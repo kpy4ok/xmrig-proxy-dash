@@ -10,37 +10,19 @@ const state = {
     autoRefresh: true,
     refreshInterval: 30
   },
-  debug: {
-    enabled: false,
-    logs: []
-  },
   sorting: {
     column: 'hashrate',
     direction: 'desc' // 'asc' or 'desc'
   },
   filters: {
     hideInactive: false // hide workers inactive for more than 10 minutes
+  },
+  hashrateHistory: {
+    timestamps: [],
+    values: [],
+    lastUpdate: null
   }
 };
-
-// Debug functions
-function debugLog(message, type = 'info') {
-  const timestamp = new Date().toISOString();
-  const log = { timestamp, message, type };
-  console.log(`[${type.toUpperCase()}] ${message}`);
-  
-  state.debug.logs.unshift(log);
-  // Keep only the last 100 logs
-  if (state.debug.logs.length > 100) {
-    state.debug.logs.pop();
-  }
-  
-  // Update debug window if it's open
-  const debugWindow = document.getElementById('debug-window');
-  if (debugWindow && state.debug.enabled) {
-    renderDebugWindow();
-  }
-}
 
 // Render functions
 function renderApp() {
@@ -54,7 +36,6 @@ function renderApp() {
           ${renderMainContent()}
         </div>
         ${state.workersInfo ? renderWorkers() : ''}
-        ${state.debug.enabled ? renderDebugWindow() : ''}
       </main>
       ${renderFooter()}
     </div>
@@ -62,6 +43,11 @@ function renderApp() {
   
   // Add event listeners after rendering
   addEventListeners();
+  
+  // Initialize hashrate chart if data exists
+  if (state.proxyInfo && document.getElementById('hashrate-chart')) {
+    initializeHashrateChart();
+  }
 }
 
 function renderHeader() {
@@ -70,9 +56,6 @@ function renderHeader() {
       <div class="container header-content">
         <h1>Mining Proxy Dashboard</h1>
         <div class="flex items-center">
-          <button id="debug-toggle" class="btn mr-2 ${state.debug.enabled ? 'btn-active' : ''}" style="background-color: ${state.debug.enabled ? '#9333ea' : '#4b5563'}">
-            ${getIcon('terminal', 16)} Debug
-          </button>
           <button id="refresh-btn" class="btn" ${state.loading ? 'disabled' : ''}>
             ${getIcon('refresh', 16)} Refresh
           </button>
@@ -230,7 +213,14 @@ function renderMainContent() {
         </div>
         
         <div class="card" style="margin-top: 1rem;">
-          <h2>Hashrate</h2>
+          <h2>Hashrate Graph</h2>
+          <div style="height: 200px;">
+            <canvas id="hashrate-chart"></canvas>
+          </div>
+        </div>
+        
+        <div class="card" style="margin-top: 1rem;">
+          <h2>Current Hashrate</h2>
           <div class="grid-hashrate">
             <div class="text-center p-2 bg-gray-100 rounded">
               <div class="text-sm text-gray-600">1 min</div>
@@ -434,41 +424,101 @@ function renderWorkers() {
   `;
 }
 
-function renderDebugWindow() {
-  const logs = state.debug.logs;
-  
-  return `
-    <div id="debug-window" class="card mt-4">
-      <div class="flex justify-between items-center p-2 border-b bg-gray-100">
-        <h2 class="font-mono">Debug Console</h2>
-        <div>
-          <button id="debug-clear" class="btn py-1 px-2" style="background-color: #4b5563;">Clear</button>
-          <button id="debug-close" class="btn py-1 px-2 ml-2" style="background-color: #ef4444;">Close</button>
-        </div>
-      </div>
-      <div class="overflow-y-auto" style="max-height: 300px; font-family: monospace; font-size: 0.875rem; background-color: #1e293b; color: #e2e8f0; padding: 0.5rem;">
-        ${logs.length === 0 ? 
-          '<div class="p-2 text-gray-400">No logs yet. Connect to the proxy to see debug information.</div>' : 
-          logs.map(log => {
-            let color = '#e2e8f0'; // Default light gray
-            if (log.type === 'error') color = '#f87171'; // Red for errors
-            if (log.type === 'warning') color = '#fbbf24'; // Yellow for warnings
-            if (log.type === 'success') color = '#4ade80'; // Green for success
-            
-            return `<div class="py-1" style="color: ${color};">[${log.timestamp.split('T')[1].split('.')[0]}] ${log.type.toUpperCase()}: ${log.message}</div>`;
-          }).join('')
-        }
-      </div>
-    </div>
-  `;
-}
-
 function renderFooter() {
   return `
     <footer>
       <p>Mining Proxy Dashboard • Connected to ${state.config.apiUrl}</p>
     </footer>
   `;
+}
+
+// Initialize hashrate chart
+function initializeHashrateChart() {
+  // Collect data for the chart
+  updateHashrateHistory();
+  
+  const labels = state.hashrateHistory.timestamps.map(timestamp => {
+    return new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  });
+  
+  const ctx = document.getElementById('hashrate-chart').getContext('2d');
+  
+  // Destroy existing chart if it exists
+  if (window.hashrateChart) {
+    window.hashrateChart.destroy();
+  }
+  
+  window.hashrateChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: labels,
+      datasets: [{
+        label: 'Hashrate (H/s)',
+        data: state.hashrateHistory.values,
+        borderColor: '#2563eb',
+        backgroundColor: 'rgba(37, 99, 235, 0.1)',
+        borderWidth: 2,
+        pointRadius: 3,
+        pointBackgroundColor: '#2563eb',
+        tension: 0.4,
+        fill: true
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: {
+        y: {
+          beginAtZero: true,
+          ticks: {
+            callback: function(value) {
+              return formatHashrate(value);
+            }
+          }
+        },
+        x: {
+          grid: {
+            display: false
+          }
+        }
+      },
+      plugins: {
+        legend: {
+          display: false
+        },
+        tooltip: {
+          callbacks: {
+            label: function(context) {
+              return formatHashrate(context.parsed.y);
+            }
+          }
+        }
+      }
+    }
+  });
+}
+
+// Update hashrate history
+function updateHashrateHistory() {
+  const now = Date.now();
+  
+  // Only add new data points every 30 seconds to avoid cluttering the chart
+  if (state.hashrateHistory.lastUpdate && (now - state.hashrateHistory.lastUpdate < 30000)) {
+    return;
+  }
+  
+  if (state.proxyInfo && state.proxyInfo.hashrate) {
+    // Add current hashrate to the history
+    state.hashrateHistory.timestamps.push(now);
+    state.hashrateHistory.values.push(state.proxyInfo.hashrate.total[0]);
+    state.hashrateHistory.lastUpdate = now;
+    
+    // Keep only the last 20 data points
+    if (state.hashrateHistory.timestamps.length > 20) {
+      state.hashrateHistory.timestamps.shift();
+      state.hashrateHistory.values.shift();
+    }
+  }
 }
 
 // Sorting function for workers
@@ -528,7 +578,6 @@ function addEventListeners() {
   if (apiUrlInput) {
     apiUrlInput.addEventListener('change', (e) => {
       state.config.apiUrl = e.target.value;
-      debugLog(`API URL changed to: ${state.config.apiUrl}`, 'info');
     });
   }
   
@@ -537,7 +586,6 @@ function addEventListeners() {
   if (accessTokenInput) {
     accessTokenInput.addEventListener('change', (e) => {
       state.config.accessToken = e.target.value;
-      debugLog(`Access token ${e.target.value ? 'set' : 'cleared'}`, 'info');
     });
   }
   
@@ -549,7 +597,6 @@ function addEventListeners() {
       document.getElementById('refresh-interval-container').style.display = 
         state.config.autoRefresh ? 'block' : 'none';
       
-      debugLog(`Auto refresh ${state.config.autoRefresh ? 'enabled' : 'disabled'}`, 'info');
       setupAutoRefresh();
     });
   }
@@ -559,37 +606,7 @@ function addEventListeners() {
   if (refreshIntervalSelect) {
     refreshIntervalSelect.addEventListener('change', (e) => {
       state.config.refreshInterval = parseInt(e.target.value);
-      debugLog(`Refresh interval set to ${state.config.refreshInterval} seconds`, 'info');
       setupAutoRefresh();
-    });
-  }
-  
-  // Debug toggle button
-  const debugToggleBtn = document.getElementById('debug-toggle');
-  if (debugToggleBtn) {
-    debugToggleBtn.addEventListener('click', () => {
-      state.debug.enabled = !state.debug.enabled;
-      debugLog(`Debug window ${state.debug.enabled ? 'opened' : 'closed'}`, 'info');
-      renderApp();
-    });
-  }
-  
-  // Debug clear button
-  const debugClearBtn = document.getElementById('debug-clear');
-  if (debugClearBtn) {
-    debugClearBtn.addEventListener('click', () => {
-      state.debug.logs = [];
-      debugLog('Debug logs cleared', 'info');
-      renderDebugWindow();
-    });
-  }
-  
-  // Debug close button
-  const debugCloseBtn = document.getElementById('debug-close');
-  if (debugCloseBtn) {
-    debugCloseBtn.addEventListener('click', () => {
-      state.debug.enabled = false;
-      renderApp();
     });
   }
   
@@ -598,7 +615,6 @@ function addEventListeners() {
   if (toggleInactiveBtn) {
     toggleInactiveBtn.addEventListener('click', () => {
       state.filters.hideInactive = !state.filters.hideInactive;
-      debugLog(`${state.filters.hideInactive ? 'Hiding' : 'Showing'} inactive workers`, 'info');
       renderApp();
     });
   }
@@ -622,7 +638,6 @@ function addEventListeners() {
         }
       }
       
-      debugLog(`Sorting table by ${column} (${state.sorting.direction})`, 'info');
       renderApp();
     });
   });
@@ -696,7 +711,6 @@ function setupAutoRefresh() {
   // Set up new interval if auto-refresh is enabled
   if (state.config.autoRefresh) {
     refreshInterval = setInterval(fetchData, state.config.refreshInterval * 1000);
-    debugLog(`Auto refresh scheduled every ${state.config.refreshInterval} seconds`, 'info');
   }
 }
 
@@ -705,16 +719,12 @@ async function fetchData() {
   renderApp();
   
   try {
-    debugLog(`Fetching proxy data from: ${state.config.apiUrl}`, 'info');
     const headers = {};
     if (state.config.accessToken) {
       headers['Authorization'] = `Bearer ${state.config.accessToken}`;
-      debugLog('Using authorization bearer token', 'info');
     }
     
-    // Fetch proxy info - UPDATED TO USE CORRECT ENDPOINT
-    debugLog(`GET request to: ${state.config.apiUrl}/1/summary`, 'info');
-    const proxyStartTime = Date.now();
+    // Fetch proxy info
     const proxyResponse = await fetch(`${state.config.apiUrl}/1/summary`, {
       headers,
       mode: 'cors'
@@ -722,21 +732,14 @@ async function fetchData() {
       throw new Error(`Network error: ${err.message}`);
     });
     
-    const proxyFetchTime = Date.now() - proxyStartTime;
-    debugLog(`Received response in ${proxyFetchTime}ms with status: ${proxyResponse.status}`, 
-             proxyResponse.ok ? 'success' : 'error');
-    
     if (!proxyResponse.ok) {
       throw new Error(`Error fetching proxy data: ${proxyResponse.status}`);
     }
     
     const proxyData = await proxyResponse.json();
-    debugLog('Successfully parsed proxy data JSON', 'success');
     state.proxyInfo = proxyData;
     
-    // Fetch workers info - UPDATED TO USE CORRECT ENDPOINT
-    debugLog(`GET request to: ${state.config.apiUrl}/1/workers`, 'info');
-    const workersStartTime = Date.now();
+    // Fetch workers info
     const workersResponse = await fetch(`${state.config.apiUrl}/1/workers`, {
       headers,
       mode: 'cors'
@@ -744,25 +747,21 @@ async function fetchData() {
       throw new Error(`Network error when fetching workers: ${err.message}`);
     });
     
-    const workersFetchTime = Date.now() - workersStartTime;
-    debugLog(`Received workers response in ${workersFetchTime}ms with status: ${workersResponse.status}`, 
-             workersResponse.ok ? 'success' : 'error');
-    
     if (!workersResponse.ok) {
       throw new Error(`Error fetching workers data: ${workersResponse.status}`);
     }
     
     const workersData = await workersResponse.json();
-    debugLog('Successfully parsed workers data JSON', 'success');
     state.workersInfo = workersData;
     
     // Connection successful
-    debugLog('Connection successful! All data fetched and parsed.', 'success');
     state.error = null;
     setupAutoRefresh();
+    
+    // Update hashrate history for the chart
+    updateHashrateHistory();
   } catch (err) {
     console.error('Failed to fetch data:', err);
-    debugLog(`Error: ${err.message}`, 'error');
     state.error = err.message;
   } finally {
     state.loading = false;
@@ -772,6 +771,5 @@ async function fetchData() {
 
 // Initialize the app
 document.addEventListener('DOMContentLoaded', () => {
-  debugLog('Dashboard initialized', 'info');
   renderApp();
 });
