@@ -13,6 +13,13 @@ const state = {
   debug: {
     enabled: false,
     logs: []
+  },
+  sorting: {
+    column: 'hashrate',
+    direction: 'desc' // 'asc' or 'desc'
+  },
+  filters: {
+    hideInactive: false // hide workers inactive for more than 10 minutes
   }
 };
 
@@ -273,7 +280,7 @@ function renderWorkers() {
     return '';
   }
   
-  const workers = state.workersInfo.workers;
+  let workers = state.workersInfo.workers;
   
   if (workers.length === 0) {
     return `
@@ -287,40 +294,139 @@ function renderWorkers() {
     `;
   }
   
+  // Apply filters
+  if (state.filters.hideInactive) {
+    const tenMinutesAgo = Date.now() - (10 * 60 * 1000);
+    workers = workers.filter(worker => worker[7] >= tenMinutesAgo);
+  }
+  
+  // Sort workers based on current sorting settings
+  workers = sortWorkers(workers, state.sorting.column, state.sorting.direction);
+  
+  // Count active vs inactive workers
+  const activeWorkers = workers.filter(worker => {
+    const tenMinutesAgo = Date.now() - (10 * 60 * 1000);
+    return worker[7] >= tenMinutesAgo;
+  }).length;
+  const inactiveWorkers = state.workersInfo.workers.length - activeWorkers;
+  
+  const getSortIcon = (column) => {
+    if (state.sorting.column === column) {
+      return state.sorting.direction === 'asc' 
+        ? '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"></polyline></svg>' 
+        : '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>';
+    }
+    return '';
+  };
+  
   return `
     <div class="card">
       <div class="p-4 border-b">
-        <h2>Workers</h2>
+        <div class="flex justify-between items-center mb-3">
+          <h2 class="mb-0">Workers (${workers.length})</h2>
+          <div>
+            <button id="toggle-inactive" class="btn ${state.filters.hideInactive ? 'btn-active' : ''}" style="background-color: ${state.filters.hideInactive ? '#f59e0b' : '#4b5563'}">
+              ${state.filters.hideInactive ? 'Show All Workers' : 'Hide Inactive Workers'}
+            </button>
+          </div>
+        </div>
+        
+        <div class="flex">
+          <div class="text-sm mr-4">
+            <span class="text-green-600 font-semibold">${activeWorkers}</span> active workers
+          </div>
+          <div class="text-sm">
+            <span class="text-gray-500 font-semibold">${inactiveWorkers}</span> inactive workers ${state.filters.hideInactive ? '(hidden)' : ''}
+          </div>
+        </div>
       </div>
       <div class="overflow-x-auto">
         <table class="w-full">
           <thead>
             <tr class="bg-gray-100">
-              <th class="py-2 px-4 text-left">Name</th>
-              <th class="py-2 px-4 text-left">IP Address</th>
-              <th class="py-2 px-4 text-center">Connections</th>
-              <th class="py-2 px-4 text-center">Accepted</th>
-              <th class="py-2 px-4 text-center">Rejected</th>
-              <th class="py-2 px-4 text-center">Invalid</th>
-              <th class="py-2 px-4 text-right">Total Hashes</th>
-              <th class="py-2 px-4 text-right">Last Seen</th>
-              <th class="py-2 px-4 text-right">Hashrate (1m)</th>
+              <th class="py-2 px-2 text-left sort-header" data-sort="name">
+                <div class="flex items-center cursor-pointer">
+                  <span>Name</span>
+                  ${getSortIcon('name')}
+                </div>
+              </th>
+              <th class="py-2 px-2 text-left sort-header" data-sort="ip">
+                <div class="flex items-center cursor-pointer">
+                  <span>IP Address</span>
+                  ${getSortIcon('ip')}
+                </div>
+              </th>
+              <th class="py-2 px-2 text-center sort-header" data-sort="connections">
+                <div class="flex items-center justify-center cursor-pointer">
+                  <span>Conn.</span>
+                  ${getSortIcon('connections')}
+                </div>
+              </th>
+              <th class="py-2 px-2 text-center sort-header" data-sort="accepted">
+                <div class="flex items-center justify-center cursor-pointer">
+                  <span>Accepted</span>
+                  ${getSortIcon('accepted')}
+                </div>
+              </th>
+              <th class="py-2 px-2 text-right sort-header" data-sort="hashrate">
+                <div class="flex items-center justify-end cursor-pointer">
+                  <span>1m</span>
+                  ${getSortIcon('hashrate')}
+                </div>
+              </th>
+              <th class="py-2 px-2 text-right sort-header" data-sort="hashrate10m">
+                <div class="flex items-center justify-end cursor-pointer">
+                  <span>10m</span>
+                  ${getSortIcon('hashrate10m')}
+                </div>
+              </th>
+              <th class="py-2 px-2 text-right sort-header" data-sort="hashrate1h">
+                <div class="flex items-center justify-end cursor-pointer">
+                  <span>1h</span>
+                  ${getSortIcon('hashrate1h')}
+                </div>
+              </th>
+              <th class="py-2 px-2 text-right sort-header" data-sort="hashrate12h">
+                <div class="flex items-center justify-end cursor-pointer">
+                  <span>12h</span>
+                  ${getSortIcon('hashrate12h')}
+                </div>
+              </th>
+              <th class="py-2 px-2 text-right sort-header" data-sort="hashrate24h">
+                <div class="flex items-center justify-end cursor-pointer">
+                  <span>24h</span>
+                  ${getSortIcon('hashrate24h')}
+                </div>
+              </th>
+              <th class="py-2 px-2 text-right sort-header" data-sort="lastseen">
+                <div class="flex items-center justify-end cursor-pointer">
+                  <span>Last Seen</span>
+                  ${getSortIcon('lastseen')}
+                </div>
+              </th>
             </tr>
           </thead>
           <tbody>
-            ${workers.map((worker, index) => `
-              <tr class="border-t hover">
-                <td class="py-3 px-4">${worker[0]}</td>
-                <td class="py-3 px-4 font-mono text-sm">${worker[1]}</td>
-                <td class="py-3 px-4 text-center">${worker[2]}</td>
-                <td class="py-3 px-4 text-center text-green-600">${worker[3]}</td>
-                <td class="py-3 px-4 text-center text-red-600">${worker[4]}</td>
-                <td class="py-3 px-4 text-center text-red-600">${worker[5]}</td>
-                <td class="py-3 px-4 text-right">${worker[6].toLocaleString()}</td>
-                <td class="py-3 px-4 text-right">${getLastSeen(worker[7])}</td>
-                <td class="py-3 px-4 text-right font-semibold">${formatHashrate(worker[8])}</td>
-              </tr>
-            `).join('')}
+            ${workers.map((worker, index) => {
+              // Determine if worker is inactive (last seen > 10 min ago)
+              const tenMinutesAgo = Date.now() - (10 * 60 * 1000);
+              const isActive = worker[7] >= tenMinutesAgo;
+              
+              return `
+                <tr class="border-t hover ${isActive ? '' : 'text-gray-400'}" data-worker-index="${index}">
+                  <td class="py-2 px-2">${worker[0]}</td>
+                  <td class="py-2 px-2 font-mono text-sm">${worker[1]}</td>
+                  <td class="py-2 px-2 text-center">${worker[2]}</td>
+                  <td class="py-2 px-2 text-center ${isActive ? 'text-green-600' : 'text-gray-400'}">${worker[3]}</td>
+                  <td class="py-2 px-2 text-right font-semibold ${isActive ? '' : 'text-gray-400'}">${formatHashrate(worker[8])}</td>
+                  <td class="py-2 px-2 text-right font-semibold ${isActive ? '' : 'text-gray-400'}">${formatHashrate(worker[9])}</td>
+                  <td class="py-2 px-2 text-right font-semibold ${isActive ? '' : 'text-gray-400'}">${formatHashrate(worker[10])}</td>
+                  <td class="py-2 px-2 text-right font-semibold ${isActive ? '' : 'text-gray-400'}">${formatHashrate(worker[11])}</td>
+                  <td class="py-2 px-2 text-right font-semibold ${isActive ? '' : 'text-gray-400'}">${formatHashrate(worker[12])}</td>
+                  <td class="py-2 px-2 text-right ${isActive ? '' : 'text-orange-500'}">${getLastSeen(worker[7])}</td>
+                </tr>
+              `;
+            }).join('')}
           </tbody>
         </table>
       </div>
@@ -363,6 +469,44 @@ function renderFooter() {
       <p>Mining Proxy Dashboard • Connected to ${state.config.apiUrl}</p>
     </footer>
   `;
+}
+
+// Sorting function for workers
+function sortWorkers(workers, column, direction) {
+  const columnIndexMap = {
+    'name': 0,
+    'ip': 1,
+    'connections': 2,
+    'accepted': 3,
+    'rejected': 4,
+    'invalid': 5,
+    'hashes': 6,
+    'lastseen': 7,
+    'hashrate': 8,
+    'hashrate10m': 9,
+    'hashrate1h': 10,
+    'hashrate12h': 11,
+    'hashrate24h': 12
+  };
+  
+  return [...workers].sort((a, b) => {
+    const columnIndex = columnIndexMap[column];
+    let valueA = a[columnIndex];
+    let valueB = b[columnIndex];
+    
+    // Special handling for string columns
+    if (column === 'name' || column === 'ip') {
+      return direction === 'asc' 
+        ? valueA.localeCompare(valueB)
+        : valueB.localeCompare(valueA);
+    }
+    
+    // Convert to numbers for numeric columns
+    valueA = Number(valueA);
+    valueB = Number(valueB);
+    
+    return direction === 'asc' ? valueA - valueB : valueB - valueA;
+  });
 }
 
 // Event listeners
@@ -448,6 +592,40 @@ function addEventListeners() {
       renderApp();
     });
   }
+  
+  // Toggle inactive workers button
+  const toggleInactiveBtn = document.getElementById('toggle-inactive');
+  if (toggleInactiveBtn) {
+    toggleInactiveBtn.addEventListener('click', () => {
+      state.filters.hideInactive = !state.filters.hideInactive;
+      debugLog(`${state.filters.hideInactive ? 'Hiding' : 'Showing'} inactive workers`, 'info');
+      renderApp();
+    });
+  }
+  
+  // Table sorting
+  const sortHeaders = document.querySelectorAll('.sort-header');
+  sortHeaders.forEach(header => {
+    header.addEventListener('click', () => {
+      const column = header.getAttribute('data-sort');
+      
+      // Toggle direction if clicking the same column
+      if (state.sorting.column === column) {
+        state.sorting.direction = state.sorting.direction === 'asc' ? 'desc' : 'asc';
+      } else {
+        state.sorting.column = column;
+        // Default to descending for numeric columns, ascending for text
+        if (column === 'name' || column === 'ip') {
+          state.sorting.direction = 'asc';
+        } else {
+          state.sorting.direction = 'desc';
+        }
+      }
+      
+      debugLog(`Sorting table by ${column} (${state.sorting.direction})`, 'info');
+      renderApp();
+    });
+  });
 }
 
 // Utility functions
